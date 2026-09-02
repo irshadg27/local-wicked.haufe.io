@@ -164,7 +164,7 @@ function getActualApis(callback: Callback<ApiDescriptionCollection>) {
     if (now - _actualApisDate < REFRESH_API_INTERVAL) {
             debug('getActualApis(): using cached APIs');
         if (_actualApis){
-            debug('getActualApis(): returning cached APIs');
+            debug('getActualApis(): returning cached APIs...');
             return callback(null, _actualApis);
         }
     }
