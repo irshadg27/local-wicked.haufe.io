@@ -150,6 +150,28 @@ export const portal = {
     },
     checkIfBundleApi : function(apiName) {
         return (apiName in bundleMap) ?  true : false 
+    },
+
+    refreshChangedApiConfigs: function (apiIds: string[], callback: Callback<ApiDescriptionCollection>) {
+        if (!_actualApis || !apiIds || apiIds.length === 0 ||
+            apiIds.some(id => !_actualApis.apis.find((api: any) => api.id === id))) {
+            _actualApisDate = 0;
+            return getActualApis(callback);
+        }
+
+        async.eachLimit(apiIds, MAX_PARALLEL_CALLS, function (apiId: string, done) {
+            wicked.getApiConfig(apiId, function (err, apiConfig: KongApiConfig) {
+                if (err)
+                    return done(err);
+                const api = _actualApis.apis.find((item: any) => item.id === apiId) as any;
+                api.config = checkApiConfig(apiConfig);
+                return done(null);
+            });
+        }, function (err) {
+            if (err)
+                return callback(err);
+            return callback(null, _actualApis);
+        });
     }
 
 };
@@ -161,13 +183,20 @@ let _actualApisDate = 0;
 function getActualApis(callback: Callback<ApiDescriptionCollection>) {
     debug('getActualApis()');
     const now = (new Date()).getTime();
-    if (now - _actualApisDate < REFRESH_API_INTERVAL) {
+    const cacheAgeMs = now - _actualApisDate;
+    debug(`getActualApis(): cache timestamp=${new Date(_actualApisDate).toISOString()}, now=${new Date(now).toISOString()}, ageMs=${cacheAgeMs}, intervalMs=${REFRESH_API_INTERVAL}`);
+        if (cacheAgeMs >= 0 && cacheAgeMs < REFRESH_API_INTERVAL && _actualApis) {
+         debug('getActualApis(): returning cached APIs...');
+         return callback(null, _actualApis);
+        }
+
+    /* if (now - _actualApisDate < REFRESH_API_INTERVAL) {
             debug('getActualApis(): using cached APIs');
         if (_actualApis){
             debug('getActualApis(): returning cached APIs...');
             return callback(null, _actualApis);
         }
-    }
+    }*/
     wicked.getApis(function (err, apiList) {
         if (err)
             return callback(err);

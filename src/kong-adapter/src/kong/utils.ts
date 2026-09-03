@@ -297,8 +297,9 @@ function kongAction(method, inputUrl, body, expectedStatusCode, callback: Callba
             }
             // Log the full URL for debugging
             debug(`Kong request successful: ${method} ${methodBody.url}`);
+            let responseBody;
             try {
-                callback(null, getJson(apiBody));
+                responseBody = getJson(apiBody);
             } catch (parseErr) {
                 error(`kongAction: JSON parse failed for : ${method} ${methodBody.url}`);
                 error(`Response status: ${apiResponse.statusCode}`);
@@ -307,6 +308,7 @@ function kongAction(method, inputUrl, body, expectedStatusCode, callback: Callba
                 errObj.responseBody = typeof apiBody === 'string' ? apiBody.substring(0, 1000) : apiBody;
                 return callback(errObj);
             }
+            return callback(null, responseBody);
         });
     }
 
