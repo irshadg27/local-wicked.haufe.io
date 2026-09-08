@@ -13,12 +13,25 @@ const axios = require('axios');
 // On Demand Resync Changes : Start
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 var watcherDebouceTimeout;
 var watcherRetryTimeout;
 var watcherChanges = [];
 const watcherDebouceTime = 10000; // 10 seconds
 const staticConfigFolder =  process.env.PORTAL_API_STATIC_CONFIG
 // On Demand Resync Changes : End
+
+// Boot marker: distinguishes a dev portal deployment from an adapter restart.
+// The container runs `forever.sh npm start`, i.e. the node process is restarted
+// *inside the same container* whenever it exits - both when we kill ourselves
+// after an apis.json/plans.json change and when we die on a runtime error. So a
+// file written to the container's own (non-volume) filesystem is still there on
+// every restart, and is gone only when a new container is started from the
+// image, which is exactly a dev portal deployment.
+// Must NOT point at a mounted volume (the static config folder, a PVC, ...),
+// those survive a deployment. Point it at a pod-scoped emptyDir if you also
+// want liveness-probe container restarts to count as restarts, not deployments.
+const bootMarkerFile = process.env.KONG_ADAPTER_BOOT_MARKER || path.join(os.tmpdir(), 'kong-adapter-booted');
 
 
 import * as wicked from 'wicked-sdk';
@@ -72,15 +85,31 @@ async.series([
     const initOptions = {
         initGlobals: true,
         syncApis: false,
-        syncConsumers: false
+        syncConsumers: false,
+        flushEvents: false,
+        webhookAction : ""
     };
-    detectChangedApis(staticConfigFolder,initOptions);
+    if (isDevPortalDeployment()) {
+        // Fresh container: the whole static config was just deployed, so every
+        // mtime looks "changed" and per-file detection is meaningless; the
+        // queued webhook events are left-overs from the previous release.
+        info('Dev portal deployment detected (no boot marker in this container); flushing stale webhook events.');
+        initOptions.webhookAction = "flush";
+    } else {
+        initOptions.webhookAction = "process";
+        info('Adapter restart detected (boot marker present); keeping pending webhook events.');
+        detectChangedApis(staticConfigFolder, initOptions);
+    }
     kongMain.init(initOptions, function (err) {
         debug('kong.init() returned.');
         if (err) {
             error('Could not initialize Kong adapter.');
             throw err;
         }
+
+        // Only now, after a successful init, mark this container as booted; if
+        // init fails and forever.sh restarts us, the flush has to happen again.
+        writeBootMarker();
 
         // Graceful shutdown
         process.on('SIGINT', function () {
@@ -236,6 +265,32 @@ function onListening() {
 }
 
 
+// Returns true if this is the first successful start of the adapter in this
+// container, i.e. a dev portal deployment - and false for every restart of the
+// process within the same container (apis.json/plans.json kill, runtime error).
+// On any error reading the marker we report "restart", so that a broken marker
+// never causes pending webhook events to be dropped.
+function isDevPortalDeployment() {
+    try {
+        return !fs.existsSync(bootMarkerFile);
+    } catch (err) {
+        warn(`Could not read boot marker ${bootMarkerFile}; assuming adapter restart.`);
+        warn(err);
+        return false;
+    }
+}
+
+function writeBootMarker() {
+    try {
+        fs.writeFileSync(bootMarkerFile, new Date().toISOString(), 'utf8');
+        debug(`Wrote boot marker ${bootMarkerFile}`);
+    } catch (err) {
+        // Not fatal, but the next restart will be taken for a deployment.
+        warn(`Could not write boot marker ${bootMarkerFile}; a restart may be taken for a deployment.`);
+        warn(err);
+    }
+}
+
 function detectChangedApis(rootFolder, initOptions) {
     try {
         debug("inside detectChangedApis");
@@ -259,20 +314,22 @@ function detectChangedApis(rootFolder, initOptions) {
             }
         }
 
-        const rootFolderChanged = isFileChanged(rootFolder, currentTime, 60);
-        if (rootFolderChanged) {
-            debug("No sync, It might be a new dev portal relase as root folder changed in last 30 minutes");
-            return;
-        }
-
+        // NOTE: the root folder mtime is deliberately not looked at any more.
+        // It also moves when the config is re-synced/re-cloned on an adapter
+        // restart, so it cannot tell a deployment from a restart; that is what
+        // the boot marker is for (see isDevPortalDeployment()).
         const plansPath = path.join(rootFolder, 'plans', 'plans.json');
         const plansChanged = isFileChanged(plansPath, currentTime, 10);
         if (plansChanged) {
-            debug("plans.json changed in last 30 minutes");
+            debug("plans.json changed in last 10 minutes");
             initOptions.syncConsumers = true;
         }
 
         const apisPath = path.join(rootFolder, 'apis');
+        if (!fs.existsSync(apisPath)) {
+            debug(`APIs folder not found: ${apisPath}`);
+            return;
+        }
         const apiFolders = fs.readdirSync(apisPath);
         for (let i = 0; i < apiFolders.length; i++) {
             const folder = apiFolders[i];

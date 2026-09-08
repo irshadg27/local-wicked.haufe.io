@@ -34,7 +34,11 @@ export const kongMain = {
                 }
             },
             flushEvents: function (callback) {
-                wicked.flushWebhookEvents('kong-adapter', callback);
+                if (options.webhookAction === "flush") {
+                    wicked.flushWebhookEvents('kong-adapter', callback);            
+                }else{
+                    return callback(null);
+                }    
             },
             syncApis: function (callback) {
                 if (options.syncApis) {
@@ -56,7 +60,7 @@ export const kongMain = {
                 sync.addPrometheusPlugin(callback);
             },
             processPendingEvents: function (callback) {
-                if (options.syncConsumers) {
+                if (options.webhookAction === "process") {
                     processPendingWebhooks(callback);
                 } else {
                     callback(null);
@@ -71,11 +75,12 @@ export const kongMain = {
         });
     },
 
-    resync: function (options={syncApis:false,syncConsumers:false,apisList:[]},done) {
+    resync: function (options={syncApis:false,syncConsumers:false,apisList:[],webhookAction:""},done) {
         const initOptions = {
             syncApis: options.syncApis,
             syncConsumers: options.syncConsumers,
-            apisList:options.apisList
+            apisList:options.apisList,
+            webhookAction: options.webhookAction
         };
         kongMain.init(initOptions, done);
     },

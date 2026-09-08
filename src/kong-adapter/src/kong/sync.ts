@@ -691,8 +691,8 @@ async function processRouteLevelPlugins(portalApi: ApiDescription, kongApi: Kong
 
     portalRoutes.forEach((portalRouteElement) => {
         portalRoutePlugins[portalRouteElement.name] = {}
-        let portalRouteElementPlugins = portalRouteElement.plugins;
-        portalRouteElementPlugins.forEach((portalPluginElement) => {
+        let portalRouteElementPlugins = portalRouteElement.plugins || [];
+        portalRouteElementPlugins.forEach((portalPluginElement) => {S
             let portalPlugin = portalPluginElement
             portalPlugin['route'] = {
                 name: portalRouteElement.name
