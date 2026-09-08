@@ -87,7 +87,7 @@ async.series([
         syncApis: false,
         syncConsumers: false,
         flushEvents: false,
-        webhookAction : ""
+        webhookAction : "process"
     };
     if (isDevPortalDeployment()) {
         // Fresh container: the whole static config was just deployed, so every
@@ -96,7 +96,6 @@ async.series([
         info('Dev portal deployment detected (no boot marker in this container); flushing stale webhook events.');
         initOptions.webhookAction = "flush";
     } else {
-        initOptions.webhookAction = "process";
         info('Adapter restart detected (boot marker present); keeping pending webhook events.');
         detectChangedApis(staticConfigFolder, initOptions);
     }
